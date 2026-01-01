@@ -5,7 +5,6 @@
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const { createUser } = require('../models/users');
 const CustomError = require('../utils/customError');
 
@@ -431,143 +430,6 @@ const deleteUser = async (req, res, next) => {
   }
 };
 
-/**
- * Request password reset
- * POST /users/forgot-password
- */
-const forgotPassword = async (req, res, next) => {
-  try {
-    const { email } = req.body;
-    
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          message: 'Email is required'
-        }
-      });
-    }
-    
-    // Find user by email
-    const user = await User.findOne({ email: email.toLowerCase() });
-    
-    // For security, don't reveal if user exists or not
-    if (!user) {
-      return res.status(200).json({
-        success: true,
-        message: 'If an account with that email exists, a password reset link has been sent.'
-      });
-    }
-    
-    // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetPasswordToken = crypto
-      .createHash('sha256')
-      .update(resetToken)
-      .digest('hex');
-    
-    // Set token expiration (1 hour from now)
-    const resetPasswordExpires = Date.now() + 3600000; // 1 hour
-    
-    // Save reset token to user
-    user.resetPasswordToken = resetPasswordToken;
-    user.resetPasswordExpires = resetPasswordExpires;
-    await user.save({ validateBeforeSave: false });
-    
-    // In production, send email with reset token
-    // For now, return the token in response (remove this in production)
-    const resetUrl = `${req.protocol}://${req.get('host')}/api/users/reset-password/${resetToken}`;
-    
-    res.status(200).json({
-      success: true,
-      message: 'Password reset token generated successfully',
-      // Remove this in production - token should be sent via email
-      data: {
-        resetToken,
-        resetUrl
-      }
-    });
-  } catch (error) {
-    // Clear reset token on error
-    if (req.body.email) {
-      const user = await User.findOne({ email: req.body.email.toLowerCase() });
-      if (user) {
-        user.resetPasswordToken = undefined;
-        user.resetPasswordExpires = undefined;
-        await user.save({ validateBeforeSave: false });
-      }
-    }
-    next(error);
-  }
-};
-
-/**
- * Reset password with token
- * POST /users/reset-password
- */
-const resetPassword = async (req, res, next) => {
-  try {
-    const { token, password } = req.body;
-    
-    if (!token || !password) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          message: 'Token and password are required'
-        }
-      });
-    }
-    
-    // Hash the token to compare with stored token
-    const hashedToken = crypto
-      .createHash('sha256')
-      .update(token)
-      .digest('hex');
-    
-    // Find user with valid reset token
-    const user = await User.findOne({
-      resetPasswordToken: hashedToken,
-      resetPasswordExpires: { $gt: Date.now() }
-    });
-    
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          message: 'Invalid or expired reset token'
-        }
-      });
-    }
-    
-    // Validate password length
-    if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          message: 'Password must be at least 6 characters long'
-        }
-      });
-    }
-    
-    // Hash new password
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-    
-    // Update user password and clear reset token
-    user.password = hashedPassword;
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save();
-    
-    res.status(200).json({
-      success: true,
-      message: 'Password has been reset successfully'
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
 module.exports = {
   register,
   login,
@@ -576,7 +438,5 @@ module.exports = {
   getAllUsers,
   getUserById,
   updateUser,
-  deleteUser,
-  forgotPassword,
-  resetPassword
+  deleteUser
 };
